@@ -2,6 +2,7 @@
 #define HELPERS_H
 
 #include <stdint.h>
+#include <metal/cpu.h>
 
 void uart_init();
 void _putc(char c);

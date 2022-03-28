@@ -13,11 +13,13 @@ define template
 freedom-e-sdk/software/$(1): freedom-e-sdk/software
 	cd freedom-e-sdk/software && ln -sd ../../$(1) || true
 build-$(1): freedom-e-sdk/software/$(1) env
-	cd freedom-e-sdk && make software PROGRAM=$(1)
+	cd freedom-e-sdk && make software PROGRAM=$(1) TARGET=sifive-hifive1-revb
 upload-$(1): build-$(1)
 	cd freedom-e-sdk && make upload PROGRAM=$(1)
 sim-$(1): build-$(1)
 	 hifive-vp $(1)/$(1)
+sim2-$(1):
+	 cd freedom-e-sdk && make software PROGRAM=$(1) TARGET=sifive-hifive1-revb && cd .. && hifive-vp $(1)/debug/$(1).elf
 endef
 
 $(foreach project,$(projects),$(eval $(call template,$(project))))
@@ -45,3 +47,7 @@ env:
 	@echo "No riscv-vp found!"
     endif
 	#export RISCV_OPENOCD="/home/dwd/dev/sifive--hifive1/freedom-e-sdk/work/build/openocd/src/openocd"
+
+clean:
+	rm -rf snake/debug
+	rm snake/snake

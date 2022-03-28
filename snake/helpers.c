@@ -3,34 +3,33 @@
 // executing out of SPI Flash at 0x20400000.
 
 #include "helpers.h"
-#include "encoding.h"
-#include "platform.h"
-#include "plic/plic_driver.h"
+#include "cpu.h"
+#include <metal/uart.h>
+#include <metal/gpio.h>
+#include <metal/machine/platform.h>
+
+#define PIN_0_OFFSET 16 // TODO maybe get constant from somewhere else
+#define RTC_FREQ METAL_FIXED_CLOCK_5_CLOCK_5_CLOCK_FREQUENCY // ==="===
+
+#define _REG32(p, i) (*(volatile uint32_t *) ((p) + (i)))
+#define GPIO_REG(offset) _REG32(METAL_SIFIVE_GPIO0_10012000_BASE_ADDRESS, offset)
+
+struct metal_uart *uart0;
+struct metal_gpio *gpio0;
 
 void uart_init()
 {
-    // Configure UART GPIO pins
-    GPIO_REG(GPIO_OUTPUT_VAL) |= IOF0_UART0_MASK;
-    GPIO_REG(GPIO_OUTPUT_EN)  |= IOF0_UART0_MASK;
-    GPIO_REG(GPIO_IOF_SEL)    &= ~IOF0_UART0_MASK;
-    GPIO_REG(GPIO_IOF_EN)     |= IOF0_UART0_MASK;
-    // RX and TX enable
-    UART0_REG(UART_REG_TXCTRL) = UART_TXEN;
-    UART0_REG(UART_REG_RXCTRL) = UART_RXEN;
+	// TODO (maybe) init registers
+    uart0 = metal_uart_get_device(0);
+	gpio0 = metal_gpio_get_device(0);
 }
 
 void _putc(char c) {
-  while ((int32_t) UART0_REG(UART_REG_TXFIFO) < 0);
-  UART0_REG(UART_REG_TXFIFO) = c;
+	metal_uart_putc(uart0, c);
 }
 
 int _getc(char * c){
-  int32_t val = (int32_t) UART0_REG(UART_REG_RXFIFO);
-  if (val > 0) {
-    *c =  val & 0xFF;
-    return 1;
-  }
-  return 0;
+	metal_uart_getc(uart0, (int *)c);
 }
 
 
@@ -52,7 +51,7 @@ void bitprint(uint32_t val)
 
 uint32_t mapPinToReg(uint8_t pin)
 {
-    if(pin < 8)
+	if(pin < 8)
     {
         return pin + PIN_0_OFFSET;
     }
@@ -70,9 +69,9 @@ uint32_t mapPinToReg(uint8_t pin)
 
 void setPinOutput(uint8_t pin)
 {
-	GPIO_REG(GPIO_INPUT_EN) &= ~(1 << mapPinToReg(pin));
-	GPIO_REG(GPIO_OUTPUT_EN) |= 1 << mapPinToReg(pin);
-	GPIO_REG(GPIO_OUTPUT_VAL) &= ~(1 << mapPinToReg(pin));
+	metal_gpio_disable_input(gpio0, mapPinToReg(pin));
+	metal_gpio_enable_output(gpio0, mapPinToReg(pin));
+	metal_gpio_clear_pin(gpio0, mapPinToReg(pin));
 }
 
 void setPinInput(uint8_t pin)
@@ -82,13 +81,13 @@ void setPinInput(uint8_t pin)
 
 void setPinInputPullup(uint8_t pin, uint8_t pullup_enable)
 {
-	GPIO_REG(GPIO_IOF_EN )    &= ~(1 << mapPinToReg(pin));
-	GPIO_REG(GPIO_OUTPUT_EN)  &= ~(1 << mapPinToReg(pin));
+	metal_gpio_disable_pinmux(gpio0, mapPinToReg(pin));
+	metal_gpio_disable_output(gpio0, mapPinToReg(pin));
 	if(pullup_enable)
-		GPIO_REG(GPIO_PULLUP_EN)  |= (1 << mapPinToReg(pin));
+		GPIO_REG(METAL_SIFIVE_GPIO0_PUE)  |= (1 << mapPinToReg(pin));
 	else
-		GPIO_REG(GPIO_PULLUP_EN)  &= ~(1 << mapPinToReg(pin));
-	GPIO_REG(GPIO_INPUT_EN)   |= 1 << mapPinToReg(pin);
+		GPIO_REG(METAL_SIFIVE_GPIO0_PUE)  &= ~(1 << mapPinToReg(pin));
+	metal_gpio_enable_input(gpio0, mapPinToReg(pin));
 }
 
 /**
@@ -99,17 +98,16 @@ void enableInterrupt(uint8_t pin, uint8_t mode)
 	switch(mode)
 	{
 	case 0:
-		GPIO_REG(GPIO_RISE_IE)    |= (1 << mapPinToReg(pin));
+		metal_gpio_config_interrupt(gpio0, mapPinToReg(pin), METAL_GPIO_INT_RISING);
 		break;
 	case 1:
-		GPIO_REG(GPIO_FALL_IE)    |= (1 << mapPinToReg(pin));
+		metal_gpio_config_interrupt(gpio0, mapPinToReg(pin), METAL_GPIO_INT_FALLING);
 		break;
 	case 2:
-		GPIO_REG(GPIO_HIGH_IE)    |= (1 << mapPinToReg(pin));
+		metal_gpio_config_interrupt(gpio0, mapPinToReg(pin), METAL_GPIO_INT_HIGH);
 		break;
 	case 3:
-		GPIO_REG(GPIO_LOW_IE)    |= (1 << mapPinToReg(pin));
-		break;
+		metal_gpio_config_interrupt(gpio0, mapPinToReg(pin), METAL_GPIO_INT_LOW);
 	default:
 		_puts("Invalid interrupt mode");
 	}
@@ -119,36 +117,36 @@ void setPin(uint8_t pin, uint8_t val)
 {
 	if(val)
 	{
-		GPIO_REG(GPIO_OUTPUT_VAL) |= 1 << mapPinToReg(pin);
+		metal_gpio_set_pin(gpio0, mapPinToReg(pin), val);
 	}
 	else
 	{
-		GPIO_REG(GPIO_OUTPUT_VAL) &= ~(1 << mapPinToReg(pin));
+		metal_gpio_clear_pin(gpio0, mapPinToReg(pin));
 	}
 }
 
 uint8_t getPin(uint8_t pin)
 {
-	return (GPIO_REG(GPIO_INPUT_VAL) & (1 << mapPinToReg(pin))) ? 1 : 0;
+	return metal_gpio_get_input_pin(gpio0, mapPinToReg(pin));
 }
 
 void printGPIOs()
 {
 	_puts("Output ENABLE ");
-	bitprint(GPIO_REG(GPIO_OUTPUT_EN));
+	bitprint(GPIO_REG(METAL_SIFIVE_GPIO0_OUTPUT_EN));
 	_puts("Output  VALUE ");
-	bitprint(GPIO_REG(GPIO_OUTPUT_VAL));
+	bitprint(GPIO_REG(METAL_SIFIVE_GPIO0_PORT));
 	_puts("Input  ENABLE ");
-	bitprint(GPIO_REG(GPIO_INPUT_EN));
+	bitprint(GPIO_REG(METAL_SIFIVE_GPIO0_INPUT_EN));
 	_puts("Input   VALUE ");
-	bitprint(GPIO_REG(GPIO_INPUT_VAL));
+	bitprint(GPIO_REG(METAL_SIFIVE_GPIO0_VALUE));
 }
 
 void sleep_u(uint64_t micros)
 {
-    volatile uint64_t *  now = (volatile uint64_t*)(CLINT_CTRL_ADDR + CLINT_MTIME);
-    volatile uint64_t then = *now + ((micros * RTC_FREQ) / (1000 * 1000));
-    while (*now < then){}
+	struct metal_cpu *cpu = get_cpu();
+	volatile uint64_t then = metal_cpu_get_mtime(cpu) + ((micros * RTC_FREQ) / (1000 * 1000));
+    while (metal_cpu_get_mtime(cpu) < then){}
 }
 
 void sleep(uint64_t millis)
@@ -158,13 +156,13 @@ void sleep(uint64_t millis)
 
 void setTimer(uint32_t millis)
 {
-	//printf("Timer in %u ms\n", millis);
-	volatile uint64_t * mtime       = (uint64_t*) (CLINT_CTRL_ADDR + CLINT_MTIME);
-	volatile uint64_t * mtimecmp    = (uint64_t*) (CLINT_CTRL_ADDR + CLINT_MTIMECMP);
-	uint64_t now = *mtime;
-	uint64_t then = now + ((millis * RTC_FREQ) / 1000);
-	*mtimecmp = then;
+	struct metal_cpu *cpu = get_cpu();
+	unsigned long long then = metal_cpu_get_mtime(cpu) + ((millis * RTC_FREQ) / 1000);
+	metal_cpu_set_mtimecmp(cpu, then);
 
-	// Enable the timer interrupt.
-	set_csr(mie, MIP_MTIP);
+    int tmr_id = metal_cpu_timer_get_interrupt_id(cpu);
+	
+    struct metal_interrupt *tmr_intr2;
+	tmr_intr2 = metal_cpu_timer_interrupt_controller(cpu);
+	metal_interrupt_enable(tmr_intr2, tmr_id);
 }

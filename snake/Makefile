@@ -1,9 +1,9 @@
-TARGET = snake
-C_SRCS += snake.c helpers.c display.c font.c framebuffer.c
-CFLAGS += -O1 -fno-builtin-printf -DUSE_PLIC -DUSE_M_TIME
+# Copyright 2019 SiFive, Inc #
+# SPDX-License-Identifier: Apache-2.0 #
 
-BSP_BASE = ../../bsp
+PROGRAM ?= snake
 
-C_SRCS += $(BSP_BASE)/drivers/plic/plic_driver.c
+$(PROGRAM): $(wildcard *.c) $(wildcard *.h) $(wildcard *.S)
 
-include $(BSP_BASE)/env/common.mk
+clean:
+	rm -f $(PROGRAM) $(PROGRAM).hex
