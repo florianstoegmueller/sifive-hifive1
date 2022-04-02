@@ -10,8 +10,7 @@
 #include "drivers.h"
 
 #define PIN_0_OFFSET 16 // TODO maybe get constant from somewhere else
-#define RTC_FREQ METAL_FIXED_CLOCK_5_CLOCK_5_CLOCK_FREQUENCY // ==="===
-#define GPIO_BASE METAL_SIFIVE_GPIO0_10012000_BASE_ADDRESS
+#define RTC_FREQ 32768
 
 void uart_init()
 {
