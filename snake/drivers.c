@@ -3,7 +3,7 @@
 
 #define UART_DEVICE_NUM 0
 #define GPIO_DEVICE_NUM 0
-#define SPI_DEVICE_NUM 0
+#define SPI_DEVICE_NUM 1
 
 struct metal_cpu *cpu;
 struct metal_uart *uart0;

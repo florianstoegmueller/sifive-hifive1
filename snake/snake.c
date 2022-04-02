@@ -56,7 +56,6 @@ struct metal_interrupt *plic;
 
 void button_handler(int id, void *data)
 {
-	printf("button with interrupt number %d pressed.\n", id); // TODO - remove
     id -= INT_GPIO_BASE;
 	if(id ==  mapPinToReg(BUTTON_D))
 	{
@@ -288,12 +287,6 @@ void delayDifficulty()
 }
 
 int main() {
-    uintptr_t mip_meip, mstatus_mie; // TODO maybe use encoding.h from riscv-opcodes
-    mip_meip = (1 << 11);
-    mstatus_mie = 0x00000008;
-
-    printf("Hello, Snake!\n");
-
     metal_init();
     if(!init_drivers())
         return 1;
@@ -306,7 +299,6 @@ int main() {
         return 1;
     }
 
-/*
 	oled_init();
 	fb_init();
 
@@ -337,10 +329,6 @@ int main() {
 		fb_init();
 		fb_flush();
 	}
-*/
 
-    while (1) {
-        __asm__ volatile ("wfi");
-    }
     return 0;
 }

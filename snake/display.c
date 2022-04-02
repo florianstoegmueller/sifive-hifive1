@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <metal/machine.h>
 #include <metal/io.h>
+#include <metal/spi.h>
 #include "display.h"
 #include "helpers.h"
 #include "drivers.h"
@@ -10,10 +11,28 @@
 #define MAX_SPI_FREQ   ( 8000000)
 #define METAL_SPI_TXWM 1
 
+#define SPI_FMT_PROTO(x)        ((x) & 0x3)
+#define SPI_FMT_ENDIAN(x)       (((x) & 0x1) << 2)
+#define SPI_FMT_DIR(x)          (((x) & 0x1) << 3)
+#define SPI_FMT_LEN(x)          (((x) & 0xf) << 16)
+
+#define SPI_DIR_RX              0
+#define SPI_DIR_TX              1
+
+#define SPI_PROTO_S             0
+#define SPI_PROTO_D             1
+#define SPI_PROTO_Q             2
+
+#define SPI_ENDIAN_MSB          0
+#define SPI_ENDIAN_LSB          1
+
 struct metal_spi_config config;
+unsigned long base;
 
 void spi_init(void)
 {
+	base = __metal_driver_sifive_spi0_control_base(get_spi());
+
 	//Pins enable output
 	metal_gpio_disable_input(get_gpio(), mapPinToReg(OLED_SDIN));
 	metal_gpio_disable_input(get_gpio(), mapPinToReg(OLED_SCLK));
@@ -33,34 +52,47 @@ void spi_init(void)
 	metal_gpio_set_pin(get_gpio(), mapPinToReg(OLED_CS), 1);
 
 	// Set up SPI controller
-    /** SPI clock divider: determines the speed of SPI
-     * transfers.
-     * The formula is CPU_FREQ/(1+SPI_SCKDIV)
-     */
+	__METAL_ACCESS_ONCE((__metal_io_u32 *) (base + METAL_SIFIVE_SPI0_SCKDIV)) = ((CPU_FREQ / MAX_SPI_FREQ) - 1);
+	__METAL_ACCESS_ONCE((__metal_io_u32 *) (base + METAL_SIFIVE_SPI0_SCKMODE)) = 0;
+	__METAL_ACCESS_ONCE((__metal_io_u32 *) (base + METAL_SIFIVE_SPI0_CSID)) = OLED_CS_OFS;
+	__METAL_ACCESS_ONCE((__metal_io_u32 *) (base + METAL_SIFIVE_SPI0_CSDEF)) = 0xffff;
+	__METAL_ACCESS_ONCE((__metal_io_u32 *) (base + METAL_SIFIVE_SPI0_CSMODE)) = 2;
+	__METAL_ACCESS_ONCE((__metal_io_u32 *) (base + METAL_SIFIVE_SPI0_FMT)) = SPI_FMT_PROTO(SPI_PROTO_S) | SPI_FMT_ENDIAN(SPI_ENDIAN_MSB) | SPI_FMT_DIR(SPI_DIR_TX) | SPI_FMT_LEN(8);
+	__METAL_ACCESS_ONCE((__metal_io_u32 *) (base + METAL_SIFIVE_SPI0_TXMARK)) = 1;
+	__METAL_ACCESS_ONCE((__metal_io_u32 *) (base + METAL_SIFIVE_SPI0_IE)) = METAL_SPI_TXWM;
+
+	// maybe a bit slower?
+	/*
 	metal_spi_init(get_spi(), ((CPU_FREQ / MAX_SPI_FREQ) - 1));
 	
-	struct metal_spi_config config = {
-		.protocol = METAL_SPI_SINGLE,
-		.polarity = 0,
-		.phase = 0,
-		.little_endian = 0,
-		.cs_active_high = 0,
-		.csid = OLED_CS_OFS,
-	};
-	unsigned long base = __metal_driver_sifive_spi0_control_base(get_spi());
+	config.protocol = METAL_SPI_SINGLE;
+	config.polarity = 0;
+	config.phase = 0;
+	config.little_endian = 0;
+	config.cs_active_high = 0;
+	config.csid = OLED_CS_OFS;
+
+	__METAL_ACCESS_ONCE((__metal_io_u32 *) (base + METAL_SIFIVE_SPI0_TXMARK)) = 1;
 	__METAL_ACCESS_ONCE((__metal_io_u32 *) (base + METAL_SIFIVE_SPI0_IE)) = METAL_SPI_TXWM;
+	*/
 }
 
 void spi(uint8_t data)
 {
-	metal_spi_transfer(get_spi(), &config, sizeof(data), (char*) &data, NULL);
+	while (__METAL_ACCESS_ONCE((__metal_io_u32 *) (base + METAL_SIFIVE_SPI0_TXDATA)) & (1 << 31))
+	{
+		asm volatile("nop");
+	}
+	__METAL_ACCESS_ONCE((__metal_io_u8 *) (base + METAL_SIFIVE_SPI0_TXDATA)) = data;
+	
+	// maybe a bit slower?
+	//metal_spi_transfer(get_spi(), &config, sizeof(data), (char*) &data, NULL);
 }
 
 void spi_complete()
 {
-	unsigned long base = __metal_driver_sifive_spi0_control_base(get_spi());
-	while ((__METAL_ACCESS_ONCE((__metal_io_u32 *) (base + METAL_SIFIVE_SPI0_IP))
-			& METAL_SPI_TXWM) == 0)
+	while (!(__METAL_ACCESS_ONCE((__metal_io_u32 *) (base + METAL_SIFIVE_SPI0_IP))
+			& METAL_SPI_TXWM))
         asm volatile("nop");
 	sleep_u(10);
 }
@@ -69,7 +101,7 @@ void mode_data(void)
 {
 	//not already in data mode
     long gpio_output_val = get_gpio()->vtable->output(get_gpio());
-	if(!(gpio_output_val) & (1 << mapPinToReg(OLED_DC)))
+	if(!((gpio_output_val) & (1 << mapPinToReg(OLED_DC))))
 	{
 		spi_complete(); /* wait for SPI to complete before toggling */
 		setPin(OLED_DC, 1);
@@ -164,7 +196,38 @@ void fadeOut(uint64_t millis)
 /** Initialize pmodoled module */
 void oled_init()
 {
-	// TODO
+	spi_init();
+
+    // Initial setup
+    //
+    //Enable RESET and D/C Pin
+	metal_gpio_disable_input(get_gpio(), mapPinToReg(OLED_RES));
+	metal_gpio_disable_input(get_gpio(), mapPinToReg(OLED_DC));
+	metal_gpio_enable_output(get_gpio(), mapPinToReg(OLED_RES));
+	metal_gpio_enable_output(get_gpio(), mapPinToReg(OLED_DC));
+
+	setPin(OLED_DC, 0);
+
+	//RESET
+	setPin(OLED_RES,0);
+	sleep_u(10);		//min 10us
+	setPin(OLED_RES,1);
+	sleep(100);		//'about 100ms'
+
+    // Command mode
+	mode_cmd();
+
+	// Initialize display to desired operating mode.
+
+    setChargePumpVoltage(0b10);
+    invertColor(0);
+    //flipDisplay(1);
+    setContrast(0xff);		//MY EYES!!!
+
+    // 4. Clear screen (entire memory)
+    oled_clear();
+
+    setDisplayOn(1);
 }
 
 void set_x(unsigned col)

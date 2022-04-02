@@ -74,7 +74,7 @@ void setPinInput(uint8_t pin)
 
 void setPinInputPullup(uint8_t pin, uint8_t pullup_enable)
 {
-    long base = __metal_driver_sifive_gpio0_base(get_gpio());
+    unsigned long base = __metal_driver_sifive_gpio0_base(get_gpio());
 	metal_gpio_disable_pinmux(get_gpio(), mapPinToReg(pin));
 	metal_gpio_disable_output(get_gpio(), mapPinToReg(pin));
 	if(pullup_enable)
