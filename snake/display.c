@@ -43,16 +43,21 @@ void spi_init(void)
 	metal_gpio_enable_output(get_gpio(), mapPinToReg(OLED_CS));
 
 	// Select IOF SPI1.MOSI [SDIN] and SPI1.SCK [SLCK] and SPI1.SS0 [CS]
-	metal_gpio_enable_pinmux(get_gpio(), mapPinToReg(OLED_SDIN), 0);
-	metal_gpio_enable_pinmux(get_gpio(), mapPinToReg(OLED_SCLK), 0);
-	metal_gpio_enable_pinmux(get_gpio(), mapPinToReg(OLED_CS), 0);
-	
+	__METAL_ACCESS_ONCE((__metal_io_u32 *) (base + METAL_SIFIVE_GPIO0_IOF_SEL)) &= ~((1 << mapPinToReg(OLED_SDIN)) |
+																					(1 << mapPinToReg(OLED_SCLK)) |
+																					(1 << mapPinToReg(OLED_CS)));
+
+	__METAL_ACCESS_ONCE((__metal_io_u32 *) (base + METAL_SIFIVE_GPIO0_IOF_EN)) |= ((1 << mapPinToReg(OLED_SDIN)) |
+																					(1 << mapPinToReg(OLED_SCLK)) |
+																					(1 << mapPinToReg(OLED_CS)));							
+
 	metal_gpio_set_pin(get_gpio(), mapPinToReg(OLED_SDIN), 1);
 	metal_gpio_set_pin(get_gpio(), mapPinToReg(OLED_SCLK), 1);
 	metal_gpio_set_pin(get_gpio(), mapPinToReg(OLED_CS), 1);
 
 	// Set up SPI controller
-	__METAL_ACCESS_ONCE((__metal_io_u32 *) (base + METAL_SIFIVE_SPI0_SCKDIV)) = ((CPU_FREQ / MAX_SPI_FREQ) - 1);
+	long cpu_clock = metal_clock_get_rate_hz(&__metal_dt_clock_4.clock);
+	__METAL_ACCESS_ONCE((__metal_io_u32 *) (base + METAL_SIFIVE_SPI0_SCKDIV)) = ((cpu_clock / MAX_SPI_FREQ) - 1);
 	__METAL_ACCESS_ONCE((__metal_io_u32 *) (base + METAL_SIFIVE_SPI0_SCKMODE)) = 0;
 	__METAL_ACCESS_ONCE((__metal_io_u32 *) (base + METAL_SIFIVE_SPI0_CSID)) = OLED_CS_OFS;
 	__METAL_ACCESS_ONCE((__metal_io_u32 *) (base + METAL_SIFIVE_SPI0_CSDEF)) = 0xffff;
@@ -60,21 +65,6 @@ void spi_init(void)
 	__METAL_ACCESS_ONCE((__metal_io_u32 *) (base + METAL_SIFIVE_SPI0_FMT)) = SPI_FMT_PROTO(SPI_PROTO_S) | SPI_FMT_ENDIAN(SPI_ENDIAN_MSB) | SPI_FMT_DIR(SPI_DIR_TX) | SPI_FMT_LEN(8);
 	__METAL_ACCESS_ONCE((__metal_io_u32 *) (base + METAL_SIFIVE_SPI0_TXMARK)) = 1;
 	__METAL_ACCESS_ONCE((__metal_io_u32 *) (base + METAL_SIFIVE_SPI0_IE)) = METAL_SPI_TXWM;
-
-	// maybe a bit slower?
-	/*
-	metal_spi_init(get_spi(), ((CPU_FREQ / MAX_SPI_FREQ) - 1));
-	
-	config.protocol = METAL_SPI_SINGLE;
-	config.polarity = 0;
-	config.phase = 0;
-	config.little_endian = 0;
-	config.cs_active_high = 0;
-	config.csid = OLED_CS_OFS;
-
-	__METAL_ACCESS_ONCE((__metal_io_u32 *) (base + METAL_SIFIVE_SPI0_TXMARK)) = 1;
-	__METAL_ACCESS_ONCE((__metal_io_u32 *) (base + METAL_SIFIVE_SPI0_IE)) = METAL_SPI_TXWM;
-	*/
 }
 
 void spi(uint8_t data)
@@ -84,9 +74,6 @@ void spi(uint8_t data)
 		asm volatile("nop");
 	}
 	__METAL_ACCESS_ONCE((__metal_io_u8 *) (base + METAL_SIFIVE_SPI0_TXDATA)) = data;
-	
-	// maybe a bit slower?
-	//metal_spi_transfer(get_spi(), &config, sizeof(data), (char*) &data, NULL);
 }
 
 void spi_complete()
